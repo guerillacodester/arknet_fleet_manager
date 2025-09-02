@@ -3,5 +3,17 @@
         "./common",
         "./vehicle_depot/vehicle",
         "./world/vehicle"
-    ]
+    ],
+
+    // Force VSCode to use ESP-IDF Python 3.11 environment
+    "python.defaultInterpreterPath": "E:/espressif/v5.4.1/python_env/idf5.4_py3.11_env/Scripts/python.exe",
+
+    // Keep using system env manager, but pinned interpreter ensures consistency
+    "python-envs.defaultEnvManager": "ms-python.python:system",
+    "python-envs.pythonProjects": [],
+
+    // Optional: suppress import errors if env sync lags
+    "python.analysis.diagnosticSeverityOverrides": {
+        "reportMissingImports": "none"
+    }
 }

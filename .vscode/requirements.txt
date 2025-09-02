@@ -1,7 +1,14 @@
 # Core mapping + visualization
 folium>=0.15.1
 
-# CLI + parsing (standard library handles most, but keep argparse explicit if desired)
-argparse
+# Database connectivity
+psycopg2-binary>=2.9.9
 
-# Utilities (all others are in stdlib: json, re, os, sys, math, collections, typing, textwrap)
+# SSH tunneling
+sshtunnel>=0.4.0
+
+# Environment variable loader
+python-dotenv>=1.0.0
+
+# CLI + parsing
+argparse
