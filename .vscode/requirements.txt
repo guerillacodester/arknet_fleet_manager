@@ -1,0 +1,7 @@
+# Core mapping + visualization
+folium>=0.15.1
+
+# CLI + parsing (standard library handles most, but keep argparse explicit if desired)
+argparse
+
+# Utilities (all others are in stdlib: json, re, os, sys, math, collections, typing, textwrap)

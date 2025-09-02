@@ -1,0 +1,55 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Debug gps_device_simulator ",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/gps_device_simulator.py",
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "justMyCode": true,
+      "args": [                                                      
+      ]
+    },
+    {
+      "name": "Debug world_vehicles_simulator",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/world_vehicles_simulator.py",
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "justMyCode": true,
+      "args": [                                                      
+      ]
+    },
+    {
+      "name": "Debug sim_speed_model",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/sim_speed_model.py",
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "justMyCode": true,
+      "args": [
+        "--vehicle-id","ZR1301",
+        "--tick", "0.1",
+        "--speed-model", "kinematic",
+        "--vehicles", "${workspaceFolder}/world/vehicles.json"
+      ]
+    },
+    {
+      "name": "Debug navigation_smoketest",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/world/vehicle/driver/navigation/navigator_smoketest.py",
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "justMyCode": true,
+      "args": [
+        "--seconds","5",
+        "--dump-all"
+      ]
+    }
+  ]
+}
