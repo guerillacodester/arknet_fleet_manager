@@ -7,7 +7,7 @@ Quick utility to render a route from a GeoJSON file into an interactive HTML map
 
 import sys
 import os
-from visualization import RouteMap
+from view_geojson import RouteMap
 
 
 def main():
