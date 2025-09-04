@@ -8,8 +8,8 @@ Interactive map generation (Folium) + post-generation HTML cleanup.
 from __future__ import annotations
 from typing import List, Tuple
 import re
-import json
 from geo_math import GeoMath
+from load_geojson import load_geojson  # <-- new import
 
 LonLat = Tuple[float, float]
 
@@ -29,9 +29,8 @@ class RouteMap:
         import folium
         from folium.plugins import MousePosition
 
-        # Load GeoJSON
-        with open(geojson_path, "r", encoding="utf-8") as f:
-            geojson_data = json.load(f)
+        # Load GeoJSON using helper module
+        geojson_data = load_geojson(geojson_path)
 
         features = geojson_data.get("features", [])
         if not features:
