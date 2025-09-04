@@ -8,7 +8,9 @@ import csv
 import json
 from typing import List, Dict, Any
 from shapely.geometry import shape
-
+from shapely import wkt
+from shapely.geometry import mapping, shape
+from db_management import DBConnection
 
 def load_routes_from_csv(path: str) -> List[Dict[str, Any]]:
     records = []
@@ -85,3 +87,27 @@ def load_routes_from_geojson(path: str, target_short_name: str | None = None):
 
     return records
 
+def load_geojson_from_db(route_short_name: str, config: dict) -> dict:
+    """
+    Load a route's geometry from Postgres via DBManagement wrapper
+    and return a GeoJSON FeatureCollection.
+    """
+    features = []
+    with DBConnection(config) as conn:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT ST_AsText(s.geom) AS wkt_geom
+                FROM routes r
+                JOIN route_shapes rs ON r.route_id = rs.route_id
+                JOIN shapes s ON rs.shape_id = s.shape_id
+                WHERE r.short_name = %s;
+            """, (route_short_name,))
+            rows = cur.fetchall()
+            for row in rows:
+                geom = wkt.loads(row["wkt_geom"])
+                features.append({
+                    "type": "Feature",
+                    "geometry": mapping(geom),
+                    "properties": {"short_name": route_short_name}
+                })
+    return {"type": "FeatureCollection", "features": features}
