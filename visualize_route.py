@@ -18,7 +18,6 @@ from load_routes import load_routes_from_geojson, load_geojson_from_db
 from view_geojson import RouteMap
 from load_config import load_config   # ✅ central config loader
 
-
 def choose_file() -> str:
     """Prompt with TAB completion for file paths."""
     completer = PathCompleter(only_directories=False, expanduser=True)
