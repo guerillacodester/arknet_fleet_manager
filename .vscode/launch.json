@@ -50,6 +50,19 @@
         "--seconds","5",
         "--dump-all"
       ]
+    },
+    {
+      "name": "Debug route_builder",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}route_builder.py",
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "justMyCode": true,
+      "args": [
+        "--seconds","5",
+        "--dump-all"
+      ]
     }
   ]
 }
