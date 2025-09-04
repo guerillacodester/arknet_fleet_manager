@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-visualization.py
-----------------
+view_geojson.py
+---------------
 Interactive map generation (Folium) + post-generation HTML cleanup.
 """
 
@@ -9,7 +9,8 @@ from __future__ import annotations
 from typing import List, Tuple
 import re
 from geo_math import GeoMath
-from load_geojson import load_geojson  # <-- new import
+from load_routes import load_routes_from_geojson   # ✅ use canonical parser
+from shapely.geometry import shape, mapping
 
 LonLat = Tuple[float, float]
 
@@ -29,14 +30,31 @@ class RouteMap:
         import folium
         from folium.plugins import MousePosition
 
-        # Load GeoJSON using helper module
-        geojson_data = load_geojson(geojson_path)
+        # ✅ Load routes using seeding parser
+        records = load_routes_from_geojson(geojson_path)
 
-        features = geojson_data.get("features", [])
+        # Convert into FeatureCollection-like structure for visualization
+        features = []
+        for rec in records:
+            geom = shape({"type": "LineString", "coordinates": []})  # fallback
+            if "geom" in rec:
+                # parse WKT back into Shapely geometry
+                from shapely import wkt
+                geom = wkt.loads(rec["geom"])
+            features.append({
+                "type": "Feature",
+                "geometry": mapping(geom),
+                "properties": {
+                    "route_id": rec.get("route_id"),
+                    "short_name": rec.get("short_name"),
+                    "long_name": rec.get("long_name"),
+                }
+            })
+
         if not features:
             return
 
-        # Compute centroid from all coordinates
+        # Collect all coords for centroid
         all_coords: List[LonLat] = []
         for feat in features:
             geom = feat.get("geometry", {})
@@ -47,22 +65,18 @@ class RouteMap:
 
         # Base map
         m = folium.Map(location=[lat_c, lon_c], zoom_start=14, tiles=None)
-
-        # Basemap ON by default
         folium.TileLayer("OpenStreetMap", name="Basemap", control=True, show=True).add_to(m)
-
-        # No basemap OFF by default
         folium.TileLayer(tiles="", name="No basemap", attr="No basemap", control=True, show=False).add_to(m)
 
         # Overlays
         fg_line = folium.FeatureGroup(name="Route", show=True)
         fg_pts = folium.FeatureGroup(name="All points", show=True)
 
-        # Draw each LineString separately
+        # Draw each feature’s geometry
         for feat in features:
-            geom = feat.get("geometry", {})
-            if geom.get("type") == "LineString":
-                coords = geom.get("coordinates", [])
+            geom = feat["geometry"]
+            if geom["type"] == "LineString":
+                coords = geom["coordinates"]
 
                 # Polyline (blue)
                 folium.PolyLine(
