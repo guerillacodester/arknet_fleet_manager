@@ -32,22 +32,13 @@ init(autoreset=True)
 # Tab completion for paths (directories + .geojson only)
 # ---------------------------
 def _normalized_path(p: str) -> str:
-    # Expand ~ and %VARS%, normalize, but keep trailing sep for dirs
     p_exp = os.path.expandvars(os.path.expanduser(p))
     if p_exp == "":
         p_exp = "." + os.sep
     return p_exp
 
 def path_completer(text, state):
-    """
-    Tab completion that drills down into directories cleanly.
-    - Shows only directories (with trailing slash) and .geojson files
-    - Skips hidden files unless explicitly typed
-    - Case-insensitive matching on Windows for convenience
-    """
     text = _normalized_path(text)
-
-    # If ending with sep or path is an existing dir → complete inside it
     if text.endswith(os.sep) and os.path.isdir(text):
         dirname = text
         basename = ""
@@ -60,7 +51,6 @@ def path_completer(text, state):
     except Exception:
         entries = []
 
-    # Match strategy: case-insensitive on Windows, exact prefix on POSIX
     def _starts_with(a: str, b: str) -> bool:
         if os.name == "nt":
             return a.lower().startswith(b.lower())
@@ -68,34 +58,27 @@ def path_completer(text, state):
 
     matches = []
     for entry in sorted(entries):
-        # Skip hidden unless user started with a dot
         if entry.startswith(".") and not basename.startswith("."):
             continue
         if not _starts_with(entry, basename):
             continue
-
         full = os.path.join(dirname, entry)
         if os.path.isdir(full):
-            # Append sep so further tabs drill into it
             matches.append(os.path.normpath(full) + os.sep)
         elif entry.lower().endswith(".geojson"):
             matches.append(os.path.normpath(full))
 
-    # No implicit './' noise; present clean relative paths
     try:
         return matches[state]
     except IndexError:
         return None
 
-# Make sure backslashes/slashes are NOT treated as word delimiters
 try:
     readline.set_completer_delims(" \t\n;")
     readline.set_completer(path_completer)
     readline.parse_and_bind("tab: complete")
 except Exception:
-    # If readline is not functional (some Windows shells), we simply skip
     pass
-
 
 # ---------------------------
 # Signals
@@ -106,12 +89,10 @@ def graceful_exit(sig, frame):
 
 signal.signal(signal.SIGINT, graceful_exit)
 
-
 # ---------------------------
 # Country selection
 # ---------------------------
 def choose_country(db):
-    """Prompt user for country using ISO, full name, or fragment search."""
     countries = select(db, "countries", ["country_id", "iso_code", "name"])
     normalized = [
         {"id": row["country_id"], "iso": row["iso_code"], "name": row["name"]}
@@ -121,8 +102,6 @@ def choose_country(db):
     country_id = None
     while not country_id:
         user_input = input("Enter country ISO code, name, or fragment: ").strip()
-
-        # exact ISO
         for row in normalized:
             if user_input.upper() == row["iso"].upper():
                 country_id = row["id"]
@@ -130,8 +109,6 @@ def choose_country(db):
                 break
         if country_id:
             break
-
-        # exact name
         for row in normalized:
             if user_input.lower() == row["name"].lower():
                 country_id = row["id"]
@@ -139,8 +116,6 @@ def choose_country(db):
                 break
         if country_id:
             break
-
-        # fragment search
         matches = [row for row in normalized if user_input.lower() in row["name"].lower()]
         if matches:
             print("\nMatches found:")
@@ -155,9 +130,7 @@ def choose_country(db):
                 print("Invalid choice, try again.")
         else:
             print("No matches found. Try again.")
-
     return country_id
-
 
 # ---------------------------
 # Seeder
@@ -174,10 +147,8 @@ def seed_routes(interactive: bool = True, geojson_mode: bool = False, geojson_pa
     if interactive:
         print(Fore.CYAN + "\nArkNet Transit – Route Seeder\n" + "-" * 40 + Style.RESET_ALL)
 
-        # --- Country selection ---
         country_id = choose_country(db)
 
-        # --- Metadata ---
         short_name = input("Enter route short name (e.g., 1, 5A, 10B): ").strip().upper()
         long_name = input("Enter route long name [optional]: ").strip() or None
         parishes = input("Enter parishes served [optional, comma-separated]: ").strip() or None
@@ -185,20 +156,17 @@ def seed_routes(interactive: bool = True, geojson_mode: bool = False, geojson_pa
         valid_from = input("Enter valid_from date [default = today]: ").strip() or None
         valid_to = input("Enter valid_to date [optional, blank if none]: ").strip() or None
 
-        # --- GeoJSON path (with tab completion) ---
         geojson_path = input("Enter path to GeoJSON file (Tab-complete supported): ").strip()
         geojson_path = _normalized_path(geojson_path)
         if not os.path.isfile(geojson_path):
             print(Fore.RED + "[ERROR]" + Style.RESET_ALL + f" File not found: {geojson_path}")
             return
 
-        # --- Geometry records ---
         geom_records = load_routes_from_geojson(geojson_path, short_name)
         if not geom_records:
             print(Fore.RED + "[ERROR]" + Style.RESET_ALL + f"No geometry found for {short_name}")
             return
 
-        # --- Confirm ---
         print("\nSummary:\n---------")
         print(f"Country ID: {country_id}")
         print(f"Route short name: {short_name}")
@@ -212,21 +180,37 @@ def seed_routes(interactive: bool = True, geojson_mode: bool = False, geojson_pa
             print("Aborted.")
             return
 
-        # --- Insert ---
-        route_id = insert(
-            db, "routes",
-            {
-                "country_id": country_id,
-                "short_name": short_name,
-                "long_name": long_name,
-                "parishes": parishes,
-                "is_active": is_active,
-                "valid_from": valid_from,
-                "valid_to": valid_to,
-            }
+        # --- Insert (with duplicate check) ---
+        route_id = None
+        existing = select(
+            db,
+            "routes",
+            columns="route_id",
+            where={"country_id": country_id, "short_name": short_name}
         )
+        if existing and len(existing) > 0:
+            route_id = existing[0]["route_id"]
+            print(Fore.YELLOW + f"[WARN] Route {short_name} already exists for this country. Using existing route_id." + Style.RESET_ALL)
+        else:
+            route_id = insert(
+                db, "routes",
+                {
+                    "country_id": country_id,
+                    "short_name": short_name,
+                    "long_name": long_name,
+                    "parishes": parishes,
+                    "is_active": is_active,
+                    "valid_from": valid_from,
+                    "valid_to": valid_to,
+                },
+                id_column="route_id"
+            )
+        if not route_id:
+            print(Fore.RED + "[ERROR]" + Style.RESET_ALL + f" Failed to get route_id for {short_name}")
+            return
+
         for geom in geom_records:
-            shape_id = insert(db, "shapes", {"geom": geom["geom"]})
+            shape_id = insert(db, "shapes", {"geom": geom["geom"]}, id_column="shape_id")
             insert(
                 db, "route_shapes",
                 {
@@ -236,7 +220,7 @@ def seed_routes(interactive: bool = True, geojson_mode: bool = False, geojson_pa
                     "is_default": geom.get("is_default", False),
                 }
             )
-        print(Fore.GREEN + "[OK]" + Style.RESET_ALL + f" Route {short_name} inserted.")
+        print(Fore.GREEN + "[OK]" + Style.RESET_ALL + f" Route {short_name} inserted/updated.")
 
     elif geojson_mode:
         if not geojson_path or not os.path.isfile(geojson_path):
@@ -244,19 +228,35 @@ def seed_routes(interactive: bool = True, geojson_mode: bool = False, geojson_pa
             return
         records = load_routes_from_geojson(geojson_path)
         for rec in records:
-            route_id = insert(
-                db, "routes",
-                {
-                    "country_id": rec.get("country_id"),
-                    "short_name": rec["short_name"],
-                    "long_name": rec.get("long_name"),
-                    "parishes": rec.get("parishes"),
-                    "is_active": rec.get("is_active", True),
-                    "valid_from": rec.get("valid_from"),
-                    "valid_to": rec.get("valid_to"),
-                }
+            route_id = None
+            existing = select(
+                db,
+                "routes",
+                columns="route_id",
+                where={"country_id": rec.get("country_id"), "short_name": rec["short_name"]}
             )
-            shape_id = insert(db, "shapes", {"geom": rec["geom"]})
+            if existing and len(existing) > 0:
+                route_id = existing[0]["route_id"]
+                print(Fore.YELLOW + f"[WARN] Route {rec['short_name']} already exists for this country. Using existing route_id." + Style.RESET_ALL)
+            else:
+                route_id = insert(
+                    db, "routes",
+                    {
+                        "country_id": rec.get("country_id"),
+                        "short_name": rec["short_name"],
+                        "long_name": rec.get("long_name"),
+                        "parishes": rec.get("parishes"),
+                        "is_active": rec.get("is_active", True),
+                        "valid_from": rec.get("valid_from"),
+                        "valid_to": rec.get("valid_to"),
+                    },
+                    id_column="route_id"
+                )
+            if not route_id:
+                print(Fore.RED + "[ERROR]" + Style.RESET_ALL + f" Failed to get route_id for {rec['short_name']}")
+                continue
+
+            shape_id = insert(db, "shapes", {"geom": rec["geom"]}, id_column="shape_id")
             insert(
                 db, "route_shapes",
                 {
@@ -267,7 +267,6 @@ def seed_routes(interactive: bool = True, geojson_mode: bool = False, geojson_pa
                 }
             )
         print(Fore.GREEN + "[OK]" + Style.RESET_ALL + f" Imported {len(records)} route(s).")
-
 
 # ---------------------------
 # CLI entrypoint
@@ -300,7 +299,6 @@ def main():
             return
 
     seed_routes(interactive=True)
-
 
 if __name__ == "__main__":
     main()

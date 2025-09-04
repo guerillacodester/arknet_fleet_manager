@@ -185,13 +185,16 @@ def insert(conn, table: str, values: dict, id_column: str = None):
         vals.append(val)
         placeholders.append("%s")
 
-    if id_column and id_column not in values:
-        cols.append(id_column)
-        placeholders.append("gen_random_uuid()")
-
     sql = f"INSERT INTO {table} ({', '.join(cols)}) VALUES ({', '.join(placeholders)})"
     with conn.cursor() as cur:
-        cur.execute(sql, vals if vals else None)
+        if id_column:
+            sql += f" RETURNING {id_column}"
+            cur.execute(sql, vals if vals else None)
+            row = cur.fetchone()
+            return row[id_column]  # RealDictCursor
+        else:
+            cur.execute(sql, vals if vals else None)
+            return None
 
 
 def update(conn, table: str, values: dict, where: dict):
