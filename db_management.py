@@ -39,14 +39,12 @@ class Forwarder(threading.Thread):
 
         while not self._stop.is_set():
             try:
-                client, addr = self.sock.accept()
+                client, _ = self.sock.accept()
                 chan = self.transport.open_channel(
                     "direct-tcpip",
                     (self.remote_host, self.remote_port),
                     client.getsockname(),
                 )
-
-                # forward data between client and remote
                 threading.Thread(target=self._pipe, args=(client, chan), daemon=True).start()
                 threading.Thread(target=self._pipe, args=(chan, client), daemon=True).start()
             except Exception:
@@ -74,7 +72,7 @@ class Forwarder(threading.Thread):
 class DBConnection:
     """
     Wrapper around psycopg2 connection and optional SSH tunnel.
-    Ensures proper cleanup.
+    Behaves like a connection: exposes cursor(), commit(), rollback(), close().
     """
 
     def __init__(self, config: dict):
@@ -83,13 +81,6 @@ class DBConnection:
         self.ssh_client = None
         self.forwarder = None
         self.local_port = None
-
-    def __enter__(self):
-        self.connect()
-        return self.conn
-
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        self.close()
 
     def connect(self):
         pg_cfg = self.config["postgres"]
@@ -102,8 +93,6 @@ class DBConnection:
 
         if ssh_host and ssh_port and ssh_user:
             print(f"[INFO] Establishing SSH tunnel {ssh_user}@{ssh_host}:{ssh_port} → {pg_cfg['host']}:{pg_cfg['port']}")
-
-            # Connect SSH
             self.ssh_client = paramiko.SSHClient()
             self.ssh_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
             self.ssh_client.connect(
@@ -112,9 +101,7 @@ class DBConnection:
                 username=ssh_user,
                 password=ssh_pass,
             )
-
-            # Setup forwarding thread
-            self.local_port = 6543  # pick a fixed local port
+            self.local_port = 6543
             self.forwarder = Forwarder(
                 self.ssh_client.get_transport(),
                 self.local_port,
@@ -122,15 +109,12 @@ class DBConnection:
                 int(pg_cfg["port"]),
             )
             self.forwarder.start()
-
             host = "127.0.0.1"
             port = self.local_port
         else:
-            # Direct connection
             host = pg_cfg["host"]
             port = pg_cfg["port"]
 
-        # Connect Postgres
         self.conn = psycopg2.connect(
             host=host,
             port=port,
@@ -141,6 +125,16 @@ class DBConnection:
         )
         self.conn.autocommit = True
         return self.conn
+
+    # proxy methods
+    def cursor(self, cursor_factory=None):
+        return self.conn.cursor(cursor_factory=cursor_factory or RealDictCursor)
+
+    def commit(self):
+        return self.conn.commit()
+
+    def rollback(self):
+        return self.conn.rollback()
 
     def close(self):
         if self.conn:
@@ -153,6 +147,18 @@ class DBConnection:
             self.ssh_client.close()
             self.ssh_client = None
 
+    # context manager
+    def __enter__(self):
+        self.connect()
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        if exc_type:
+            self.rollback()
+        else:
+            self.commit()
+        self.close()
+
 
 # ---------------------------
 # Utility functions
@@ -160,12 +166,10 @@ class DBConnection:
 
 def table_exists(conn, table: str) -> bool:
     with conn.cursor() as cur:
-        cur.execute("""
-            SELECT EXISTS (
-                SELECT FROM information_schema.tables
-                WHERE table_name = %s
-            );
-        """, (table,))
+        cur.execute(
+            "SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name = %s);",
+            (table,),
+        )
         return cur.fetchone()["exists"]
 
 
@@ -206,6 +210,10 @@ def delete(conn, table: str, where: dict):
 
 
 def select(conn, table: str, columns="*", where: dict = None, limit: int = None):
+    # Normalize columns: list → comma-separated string
+    if isinstance(columns, (list, tuple)):
+        columns = ", ".join(columns)
+
     sql = f"SELECT {columns} FROM {table}"
     vals = []
     if where:
@@ -217,3 +225,4 @@ def select(conn, table: str, columns="*", where: dict = None, limit: int = None)
     with conn.cursor() as cur:
         cur.execute(sql, vals if vals else None)
         return cur.fetchall()
+
