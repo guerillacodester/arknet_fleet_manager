@@ -8,6 +8,7 @@ Interactive map generation (Folium) + post-generation HTML cleanup.
 from __future__ import annotations
 from typing import List, Tuple
 import re
+import json
 from geo_math import GeoMath
 
 LonLat = Tuple[float, float]
@@ -19,53 +20,75 @@ class RouteMap:
     def __init__(self, route_id: str = "route"):
         self.route_id = route_id
 
-    def generate(self, route_coords: List[LonLat], out_html: str) -> None:
+    def generate(self, geojson_path: str, out_html: str) -> None:
         """
         Create Folium map with:
-          - Base layers: Basemap / No basemap (radio)
-          - Overlays: Route (polyline), All stops (point markers)
+          - Base layers: Basemap (default) / No basemap (toggle)
+          - Overlays: Route segments (blue polylines), All vertices (red points)
         """
         import folium
         from folium.plugins import MousePosition
 
-        if not route_coords:
+        # Load GeoJSON
+        with open(geojson_path, "r", encoding="utf-8") as f:
+            geojson_data = json.load(f)
+
+        features = geojson_data.get("features", [])
+        if not features:
             return
 
-        lat_c, lon_c = GeoMath.centroid(route_coords)  # centroid returns (lat, lon)
+        # Compute centroid from all coordinates
+        all_coords: List[LonLat] = []
+        for feat in features:
+            geom = feat.get("geometry", {})
+            if geom.get("type") == "LineString":
+                all_coords.extend(geom.get("coordinates", []))
 
+        lat_c, lon_c = GeoMath.centroid(all_coords)
+
+        # Base map
         m = folium.Map(location=[lat_c, lon_c], zoom_start=14, tiles=None)
 
-        # Base layers
-        folium.TileLayer("OpenStreetMap", name="Basemap", control=True).add_to(m)
-        folium.TileLayer(tiles="", name="No basemap", attr="No basemap", control=True).add_to(m)
+        # Basemap ON by default
+        folium.TileLayer("OpenStreetMap", name="Basemap", control=True, show=True).add_to(m)
+
+        # No basemap OFF by default
+        folium.TileLayer(tiles="", name="No basemap", attr="No basemap", control=True, show=False).add_to(m)
 
         # Overlays
         fg_line = folium.FeatureGroup(name="Route", show=True)
-        fg_pts = folium.FeatureGroup(name="All stops", show=True)
+        fg_pts = folium.FeatureGroup(name="All points", show=True)
 
-        # Polyline (Folium expects (lat, lon))
-        folium.PolyLine(
-            [(lat, lon) for (lon, lat) in route_coords],
-            color="blue",
-            weight=3,
-            opacity=0.7,
-            popup=f"Route {self.route_id}",
-        ).add_to(fg_line)
+        # Draw each LineString separately
+        for feat in features:
+            geom = feat.get("geometry", {})
+            if geom.get("type") == "LineString":
+                coords = geom.get("coordinates", [])
 
-        # Points
-        for i, (lon, lat) in enumerate(route_coords):
-            folium.CircleMarker(
-                location=[lat, lon],
-                radius=3,
-                color="red",
-                fill=True,
-                fill_opacity=0.8,
-                popup=f"Point {i}<br>Lat={lat:.6f}<br>Lon={lon:.6f}",
-            ).add_to(fg_pts)
+                # Polyline (blue)
+                folium.PolyLine(
+                    [(lat, lon) for lon, lat in coords],
+                    color="blue",
+                    weight=3,
+                    opacity=0.7,
+                    popup=f"Route {self.route_id}",
+                ).add_to(fg_line)
+
+                # Points (red)
+                for i, (lon, lat) in enumerate(coords):
+                    folium.CircleMarker(
+                        location=[lat, lon],
+                        radius=3,
+                        color="red",
+                        fill=True,
+                        fill_opacity=0.8,
+                        popup=f"Point {i}<br>Lat={lat:.6f}<br>Lon={lon:.6f}",
+                    ).add_to(fg_pts)
 
         fg_line.add_to(m)
         fg_pts.add_to(m)
 
+        # Mouse position display
         MousePosition(
             position="bottomright",
             separator=" | ",
@@ -74,6 +97,7 @@ class RouteMap:
             lng_formatter="function(num) {return L.Util.formatNum(num, 6);}",
         ).add_to(m)
 
+        # Layer control
         folium.LayerControl(collapsed=False).add_to(m)
         m.save(out_html)
 
@@ -96,20 +120,19 @@ class RouteMap:
 
         # Ensure <title>
         if not re.search(r'<title>.*?</title>', html, flags=re.IGNORECASE | re.DOTALL):
-            html = re.sub(r'<head[^>]*>', f'<head>\n<title>Route {self.route_id}</title>', html, count=1, flags=re.IGNORECASE)
+            html = re.sub(
+                r'<head[^>]*>', f'<head>\n<title>Route {self.route_id}</title>',
+                html, count=1, flags=re.IGNORECASE
+            )
 
         # Normalize charset
         html = re.sub(
             r'<meta[^>]*http-equiv\s*=\s*["\']content-type["\'][^>]*>',
-            '<meta charset="utf-8">',
-            html,
-            flags=re.IGNORECASE,
+            '<meta charset="utf-8">', html, flags=re.IGNORECASE,
         )
         html = re.sub(
             r'<meta\s+charset\s*=\s*["\'][^"\']*["\']\s*/?>',
-            '<meta charset="utf-8">',
-            html,
-            flags=re.IGNORECASE,
+            '<meta charset="utf-8">', html, flags=re.IGNORECASE,
         )
 
         # Fix viewport
