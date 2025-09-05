@@ -12,6 +12,7 @@ from psycopg2.extras import RealDictCursor
 import paramiko
 import socket
 import threading
+import time
 
 
 class Forwarder(threading.Thread):
@@ -35,7 +36,8 @@ class Forwarder(threading.Thread):
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         self.sock.bind(("127.0.0.1", self.local_port))
-        self.sock.listen(1)
+        self.sock.listen(5)
+        self.sock.settimeout(1.0)  # prevent permanent block on accept()
 
         while not self._stop.is_set():
             try:
@@ -47,7 +49,10 @@ class Forwarder(threading.Thread):
                 )
                 threading.Thread(target=self._pipe, args=(client, chan), daemon=True).start()
                 threading.Thread(target=self._pipe, args=(chan, client), daemon=True).start()
-            except Exception:
+            except socket.timeout:
+                continue
+            except Exception as e:
+                print(f"[ERROR] Forwarder exception: {e}")
                 break
 
     def _pipe(self, src, dst):
@@ -60,8 +65,14 @@ class Forwarder(threading.Thread):
         except Exception:
             pass
         finally:
-            src.close()
-            dst.close()
+            try:
+                src.close()
+            except Exception:
+                pass
+            try:
+                dst.close()
+            except Exception:
+                pass
 
     def stop(self):
         self._stop.set()
@@ -101,16 +112,25 @@ class DBConnection:
                 username=ssh_user,
                 password=ssh_pass,
             )
-            self.local_port = 6543
+
+            # pick a free local port
+            tmp_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            tmp_sock.bind(("127.0.0.1", 0))
+            self.local_port = tmp_sock.getsockname()[1]
+            tmp_sock.close()
+
             self.forwarder = Forwarder(
                 self.ssh_client.get_transport(),
                 self.local_port,
-                pg_cfg["host"],
+                pg_cfg["host"],      # host from the server’s perspective
                 int(pg_cfg["port"]),
             )
             self.forwarder.start()
+            time.sleep(0.5)  # let forwarder thread settle
+
             host = "127.0.0.1"
             port = self.local_port
+            print(f"[INFO] Tunnel active: localhost:{port} → {pg_cfg['host']}:{pg_cfg['port']}")
         else:
             host = pg_cfg["host"]
             port = pg_cfg["port"]
@@ -122,6 +142,7 @@ class DBConnection:
             user=env_cfg["DB_USER"],
             password=env_cfg["DB_PASS"],
             cursor_factory=RealDictCursor,
+            connect_timeout=5,   # avoid hanging forever
         )
         self.conn.autocommit = True
         return self.conn
@@ -228,4 +249,3 @@ def select(conn, table: str, columns="*", where: dict = None, limit: int = None)
     with conn.cursor() as cur:
         cur.execute(sql, vals if vals else None)
         return cur.fetchall()
-
